@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BKK Élő Ikerkijelző Szimulátor</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght=700&family=Ubuntu+Mono:wght=700&family=Ubuntu:wght=500;700&display=swap');
+        
+        .bkk-board-bg {
+            background-color: #203346;
+            background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 0);
+            background-size: 4px 4px;
+        }
+
+        .led-amber {
+            color: #ffaa00;
+            text-shadow: 0 0 3px rgba(255, 170, 0, 0.7), 0 0 6px rgba(255, 170, 0, 0.4);
+        }
+
+        .led-font {
+            font-family: 'Ubuntu Mono', 'Courier Prime', monospace;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .label-font {
+            font-family: 'Ubuntu', sans-serif;
+            color: #e2e8f0;
+        }
+
+        .scroll-container {
+            overflow: hidden;
+            white-space: nowrap;
+            display: flex;
+            width: 100%;
+        }
+
+        .scroll-text {
+            display: inline-block;
+            will-change: transform;
+        }
+
+        .is-scrolling {
+            animation: bkk-marquee 40s linear infinite;
+            padding-left: 40px;
+        }
+
+        @keyframes bkk-marquee {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(-100%, 0, 0); }
+        }
+
+        .led-dot-matrix {
+            position: relative;
+        }
+        .led-dot-matrix::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(0,0,0,0.12) 50%, transparent 50%), linear-gradient(90deg, rgba(0,0,0,0.12) 50%, transparent 50%);
+            background-size: 3px 3px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Bemeneti mezők javított láthatósága Mobilon */
+        .custom-input {
+            background-color: #171717 !important;
+            color: #ffffff !important;
+            border: 1px solid #404040 !important;
+            font-size: 14px !important;
+            font-weight: bold !important;
+        }
+        .custom-input:focus {
+            border-color: #ffaa00 !important;
+            outline: none !important;
+        }
+    </style>
+</head>
+<body class="bg-neutral-950 text-gray-100 min-h-screen flex flex-col items-center p-2 sm:p-4 selection:bg-[#ffaa00] selection:text-black">
+
+    <header class="w-full max-w-7xl text-center my-2">
+        <h1 class="text-xl font-bold text-gray-200">BKK Élő BudapestGO API Ikerkijelző</h1>
+        <p class="text-xs text-gray-400">Automatikus dupla-proxy lekérdezéssel és hibaáthidalással</p>
+    </header>
+
+    <main class="w-full max-w-7xl flex-grow flex flex-col justify-center items-center">
+        
+        <!-- MEGÁLLÓKÓDOK BEÁLLÍTÓ SÁV -->
+        <div class="w-full bg-neutral-900 p-3 rounded mb-4 border border-neutral-800 flex flex-col gap-3">
+            <div class="text-xs text-emerald-400 font-bold flex items-center justify-between">
+                <span id="api-status-indicator">🟢 BKK API kapcsolat aktív</span>
+                <span class="text-gray-400 font-normal text-[10px]">Beírhatod így is: #F01159 vagy F01159</span>
+            </div>
+            
+            <form id="stop-form" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neutral-800">
+                <div class="flex items-center gap-2">
+                    <label class="text-[11px] text-gray-300 shrink-0 font-bold">Bal megálló kód:</label>
+                    <input type="text" id="stop-fo-input" value="#F03952" placeholder="pl. #F03952" class="custom-input rounded px-3 py-2 w-full">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-[11px] text-gray-300 shrink-0 font-bold">Jobb megálló kód:</label>
+                    <input type="text" id="stop-sos-input" value="#F03942" placeholder="pl. #F03942" class="custom-input rounded px-3 py-2 w-full">
+                </div>
+                <button type="submit" id="btn-refresh-stops" class="sm:col-span-2 bg-[#ffaa00] hover:bg-[#e69900] text-black font-bold py-2 rounded text-xs transition-all shadow-md mt-1">
+                    ✅ MEGÁLLÓK FRISSÍTÉSE / LEKÉRDEZÉS
+                </button>
+            </form>
+        </div>
+
+        <!-- KÉT KIJELZŐ EGYMÁS MELLETT -->
+        <div class="w-full grid grid-cols-1 lg:grid-cols-2 gap-4">
+            
+            <!-- 1. BAL OLDALI KIJELZŐ -->
+            <div class="bkk-board-bg p-3 pb-2 rounded shadow-2xl border-4 border-slate-700 relative led-dot-matrix flex flex-col select-none">
+                <div class="flex justify-between items-center px-2 pb-1 border-b border-slate-600/30 text-xs sm:text-sm font-semibold label-font tracking-wide">
+                    <div class="w-[20%] text-left">Járat</div>
+                    <div class="w-[62%] text-left pl-4">Irány</div>
+                    <div class="w-[18%] text-right">Indulás</div>
+                </div>
+                <div id="fo-rows-container" class="flex flex-col pt-2 led-font led-amber text-base sm:text-xl md:text-2xl space-y-1 min-h-[320px]"></div>
+                <!-- Különálló INFO csík alul -->
+                <div class="border-t border-dashed border-slate-600/20 pt-1.5 pb-1 flex led-font led-amber text-base sm:text-xl">
+                    <div class="w-[20%] font-bold text-red-500 shrink-0">⚠️ INFO</div>
+                    <div class="w-[80%] overflow-hidden relative"><div class="scroll-container"><span id="fo-info-text" class="scroll-text"></span></div></div>
+                </div>
+                <div class="flex justify-between items-end mt-2 pt-1 border-t border-slate-600/30 label-font">
+                    <div class="text-base sm:text-xl font-bold text-white px-1" id="fo-stop-title">Kispest, Fő utca</div>
+                    <div class="text-right font-bold text-xs sm:text-sm flex items-center space-x-1 text-white"><span>BUDAPEST</span><span class="text-xs">👑</span></div>
+                </div>
+            </div>
+
+            <!-- 2. JOBB OLDALI KIJELZŐ -->
+            <div class="bkk-board-bg p-3 pb-2 rounded shadow-2xl border-4 border-slate-700 relative led-dot-matrix flex flex-col select-none">
+                <div class="flex justify-between items-center px-2 pb-1 border-b border-slate-600/30 text-xs sm:text-sm font-semibold label-font tracking-wide">
+                    <div class="w-[20%] text-left">Járat</div>
+                    <div class="w-[62%] text-left pl-4">Irány</div>
+                    <div class="w-[18%] text-right">Indulás</div>
+                </div>
+                <div id="sos-rows-container" class="flex flex-col pt-2 led-font led-amber text-base sm:text-xl md:text-2xl space-y-1 min-h-[320px]"></div>
+                <!-- Különálló INFO csík alul -->
+                <div class="border-t border-dashed border-slate-600/20 pt-1.5 pb-1 flex led-font led-amber text-base sm:text-xl">
+                    <div class="w-[20%] font-bold text-red-500 shrink-0">⚠️ INFO</div>
+                    <div class="w-[80%] overflow-hidden relative"><div class="scroll-container"><span id="sos-info-text" class="scroll-text"></span></div></div>
+                </div>
+                <div class="flex justify-between items-end mt-2 pt-1 border-t border-slate-600/30 label-font">
+                    <div class="text-base sm:text-xl font-bold text-white px-1" id="sos-stop-title">Kispest, Sós utca</div>
+                    <div class="text-right font-bold text-xs sm:text-sm flex items-center space-x-1 text-white"><span>BUDAPEST</span><span class="text-xs">👑</span></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- MANUÁLIS INFO BEÍRÓ PANEL -->
+        <div class="w-full max-w-7xl bg-neutral-900 p-3 rounded border border-neutral-800 mt-4">
+            <h3 class="font-bold text-sm text-[#ffaa00] mb-1">⚠️ Alsó közlemények manuális felülbírálása</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-[10px] text-gray-400">Bal kijelző INFO csík:</label>
+                    <input type="text" id="fo-input" value="Adatok letöltése..." class="custom-input w-full rounded p-1 text-xs">
+                </div>
+                <div>
+                    <label class="block text-[10px] text-gray-400">Jobb kijelző INFO csík:</label>
+                    <input type="text" id="sos-input" value="Adatok letöltése..." class="custom-input w-full rounded p-1 text-xs">
+                </div>
+            </div>
+            <button id="btn-update-havaria" class="w-full bg-neutral-800 hover:bg-neutral-700 text-[#ffaa00] font-bold py-1.5 rounded text-xs border border-[#ffaa00]/40 mt-3">
+                MANUÁLIS SZÖVEG FRISSÍTÉSE
+            </button>
+        </div>
+    </main>
+
+    <script>
+        const apiKey = "d9b4c26c-1dfd-46ef-aa52-37610aa60a23";
+        const DEFAULT_FO_STOP = "BKK_F03952";
+        const DEFAULT_SOS_STOP = "BKK_F03942";
+
+        let foData = [];
+        let sosData = [];
+
+        function formatStopId(rawInput) {
+            if (!rawInput) return "";
+            let cleaned = rawInput.trim().toUpperCase();
+            if (cleaned.startsWith('#')) cleaned = cleaned.substring(1);
+            if (!cleaned.startsWith('BKK_')) cleaned = 'BKK_' + cleaned;
+            return cleaned;
+        }
+
+        // TARTALÉK PROXY RENDSZER A BIZTOS SIKERHEZ
+        async function fetchWithFallback(targetUrl) {
+            // 1. Próbálkozás: corsproxy.io
+            try {
+                const res1 = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`);
+                if (res1.ok) {
+                    const data = await res1.json();
+                    if (data && data.code === 200) return data;
+                }
+            } catch (e) {
+                console.warn("Proxy 1 sikertelen, váltás Proxy 2-re...");
+            }
+
+            // 2. Próbálkozás: api.allorigins.win (Tartalék)
+            try {
+                const res2 = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`);
+                if (res2.ok) {
+                    const wrapper = await res2.json();
+                    const data = JSON.parse(wrapper.contents);
+                    if (data && data.code === 200) return data;
+                }
+            } catch (e) {
+                console.error("Proxy 2 is hibára futott.");
+            }
+
+            return null;
+        }
+
+        async function fetchBkkData(rawStopId) {
+            const stopId = formatStopId(rawStopId);
+            if (!stopId) return null;
+
+            const targetUrl = `https://futar.bkk.hu/api/query/v1/ws/otp/api/where/arrivals-and-departures-for-stop.json?stopId=${stopId}&onlyDepartures=true&limit=9&key=${apiKey}`;
+
+            try {
+                const json = await fetchWithFallback(targetUrl);
+
+                if (json && json.code === 200 && json.data && json.data.entry) {
+                    document.getElementById('api-status-indicator').textContent = "🟢 BKK API kapcsolat aktív";
+                    document.getElementById('api-status-indicator').className = "text-xs text-emerald-400 font-bold";
+
+                    const stopTimes = json.data.entry.stopTimes || [];
+                    const references = json.data.references || {};
+                    const now = Math.floor(Date.now() / 1000);
+
+                    const stopName = (references.stops && references.stops[stopId]?.name) || null;
+
+                    const routeIdsAtStop = new Set();
+                    const departures = stopTimes.map(st => {
+                        const tripId = st.tripId;
+                        const routeId = references.trips && references.trips[tripId]?.routeId;
+                        if (routeId) routeIdsAtStop.add(routeId);
+                        const route = references.routes && references.routes[routeId];
+                        const arrivalTime = st.predictedArrivalTime || st.arrivalTime;
+                        const diffMin = Math.round((arrivalTime - now) / 
+      
